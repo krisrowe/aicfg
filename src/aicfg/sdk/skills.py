@@ -67,37 +67,51 @@ def _list_registered_marketplaces() -> list[dict]:
     return results
 
 
+CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
 def _fetch_marketplace(alias: str, url: str) -> tuple[Path, bool, str]:
-    """Fetch/update a marketplace repo. Returns (cache_path, from_cache, message)."""
+    """Fetch/update a marketplace. Clones to /tmp, strips .git, swaps into cache.
+    Skips fetch if cache is less than CACHE_TTL_SECONDS old.
+    Returns (cache_path, from_cache, message)."""
+    import tempfile
+    import time
+
     cache_path = _marketplace_cache_path(alias)
 
-    if cache_path.exists():
-        try:
-            subprocess.run(
-                ["git", "-C", str(cache_path), "pull", "--ff-only", "-q"],
-                timeout=FETCH_TIMEOUT, capture_output=True, check=True,
-            )
-            _write_marketplace_meta(cache_path, alias, url)
-            return cache_path, False, "updated"
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+    # Skip fetch if cache is fresh
+    meta_file = cache_path / MARKETPLACE_META_FILE
+    if meta_file.exists():
+        age = time.time() - meta_file.stat().st_mtime
+        if age < CACHE_TTL_SECONDS:
+            return cache_path, True, f"cache fresh ({int(age)}s old)"
+
+    tmp_dir = None
+
+    try:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="aicfg-marketplace-"))
+        clone_path = tmp_dir / "repo"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth=1", url, str(clone_path)],
+            timeout=FETCH_TIMEOUT, capture_output=True, check=True,
+        )
+        shutil.rmtree(clone_path / ".git")
+        _write_marketplace_meta(clone_path, alias, url)
+
+        # Atomic swap into cache
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if cache_path.exists():
+            shutil.rmtree(cache_path)
+        shutil.copytree(clone_path, cache_path)
+
+        return cache_path, False, "updated"
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        if cache_path.exists():
             return cache_path, True, "using cached version (fetch timed out or failed)"
-    else:
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(
-                ["git", "clone", "-q", "--depth=1", url, str(cache_path)],
-                timeout=FETCH_TIMEOUT, capture_output=True, check=True,
-            )
-            _write_marketplace_meta(cache_path, alias, url)
-            return cache_path, False, "cloned"
-        except subprocess.TimeoutExpired:
-            if cache_path.exists():
-                shutil.rmtree(cache_path)
-            raise ValueError(f"Clone timed out for {alias} ({url})")
-        except subprocess.CalledProcessError as e:
-            if cache_path.exists():
-                shutil.rmtree(cache_path)
-            raise ValueError(f"Clone failed for {alias} ({url}): {e.stderr.decode().strip()}")
+        raise ValueError(f"Fetch failed for {alias} ({url}) and no cache available")
+    finally:
+        if tmp_dir and tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
 
 
 def marketplace_register(alias: str, url: str) -> dict:
@@ -410,14 +424,9 @@ def _find_skill_source(name: str) -> tuple[Optional[Path], Optional[str], str]:
     """
     matches = []
     for mp in _list_registered_marketplaces():
-        cache_path = mp["path"]
-        for skill_dir in cache_path.iterdir():
-            skill_md = skill_dir / "SKILL.md"
-            if not skill_md.exists():
-                continue
-            meta, _ = parse_skill_md(skill_md)
-            if meta.get("name") == name:
-                matches.append((skill_dir, mp["alias"], mp["url"]))
+        for skill in _scan_skills_dir(mp["path"], mp["alias"]):
+            if skill["name"] == name:
+                matches.append((Path(skill["source_path"]), mp["alias"], mp["url"]))
 
     if len(matches) > 1:
         sources = [f"  {alias}/{name}" for _, alias, _ in matches]
