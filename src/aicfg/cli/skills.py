@@ -61,12 +61,11 @@ def marketplace_remove(alias):
 
 
 @skills.command(name="list")
-@click.option("--category", "-c", help="Filter by category")
 @click.option("--target", "-t", type=click.Choice(["claude", "gemini"]), help="Filter by platform")
 @click.option("--installed", is_flag=True, default=None, help="Show only installed skills")
 @click.option("--not-installed", is_flag=True, default=None, help="Show only not-installed skills")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text", help="Output format")
-def list_skills(category, target, installed, not_installed, fmt):
+def list_skills(target, installed, not_installed, fmt):
     """List available skills."""
     if installed and not_installed:
         click.echo("Cannot specify both --installed and --not-installed", err=True)
@@ -78,7 +77,7 @@ def list_skills(category, target, installed, not_installed, fmt):
     elif not_installed:
         installed_filter = False
 
-    results = sdk.list_skills(category=category, target=target, installed=installed_filter)
+    results = sdk.list_skills(target=target, installed=installed_filter)
 
     if fmt == "json":
         console.print_json(json.dumps(results))
@@ -133,8 +132,6 @@ def show(name):
 
     console.print(f"\n[bold cyan]{skill['name']}[/bold cyan]")
     console.print(f"  [dim]Description:[/dim] {skill['description']}")
-    console.print(f"  [dim]Category:[/dim]    {skill['category'] or '(none)'}")
-    console.print(f"  [dim]Invocation:[/dim]  {skill['invocation']}")
     console.print(f"  [dim]Targets:[/dim]     {', '.join(skill['effective_targets'])}")
     console.print(f"  [dim]Source:[/dim]      {skill.get('source', '-')}")
 

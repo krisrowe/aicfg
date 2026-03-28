@@ -59,13 +59,6 @@ def get_project_cmds_dir() -> Path:
     except subprocess.CalledProcessError:
         return Path.cwd() / ".gemini" / "commands"
 
-def get_skill_source_dir() -> Path:
-    """Skills source directory in the aicfg repo (src/aicfg/skills)."""
-    path_str = os.environ.get("AICFG_SKILL_SOURCE_DIR")
-    if path_str:
-        return Path(path_str)
-    return get_aicfg_tool_repo_dir() / "src" / "aicfg" / "skills"
-
 def get_claude_skills_dir() -> Path:
     """Claude Code user skills directory (~/.claude/skills)."""
     path_str = os.environ.get("AICFG_CLAUDE_SKILLS_DIR")
@@ -86,10 +79,6 @@ def get_ai_common_config_dir() -> Path:
     if path_str:
         return Path(path_str)
     return Path.home() / ".config" / "ai-common"
-
-def get_skills_config_path() -> Path:
-    """Path to skills.json (~/.config/ai-common/skills.json)."""
-    return get_ai_common_config_dir() / "skills.json"
 
 def get_marketplace_cache_dir() -> Path:
     """Cache directory for marketplace clones (~/.cache/ai-common/skills/marketplaces)."""

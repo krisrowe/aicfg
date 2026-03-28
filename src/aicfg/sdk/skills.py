@@ -1,6 +1,5 @@
 """SDK for managing cross-tool AI agent skills."""
 
-import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,21 +11,16 @@ from aicfg.sdk.config import (
     get_claude_skills_dir,
     get_gemini_skills_dir,
     get_marketplace_cache_dir,
-    get_user_cmds_dir,
 )
 
-AICFG_ONLY_FIELDS = {"only", "exclude", "invocation", "category", "claude", "gemini"}
 SUPPORTED_PLATFORMS = {"claude", "gemini"}
-VALID_INVOCATION_MODES = {"both", "slash-only", "ambient-only"}
 FETCH_TIMEOUT = 5
+CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
 # --- Marketplace management ---
 # Marketplaces are git repos cached under ~/.cache/ai-common/skills/marketplaces/<slug>/
 # Each cache dir contains a .marketplace file (line 1: alias, line 2: url).
-# NOTE: Cache dirs are not cleaned up automatically. Over extensive testing or
-# repeated register/remove cycles, stale dirs may accumulate. Not a concern
-# for normal use but worth noting for development.
 
 MARKETPLACE_META_FILE = ".marketplace"
 
@@ -67,9 +61,6 @@ def _list_registered_marketplaces() -> list[dict]:
     return results
 
 
-CACHE_TTL_SECONDS = 300  # 5 minutes
-
-
 def _fetch_marketplace(alias: str, url: str) -> tuple[Path, bool, str]:
     """Fetch/update a marketplace. Clones to /tmp, strips .git, swaps into cache.
     Skips fetch if cache is less than CACHE_TTL_SECONDS old.
@@ -79,7 +70,6 @@ def _fetch_marketplace(alias: str, url: str) -> tuple[Path, bool, str]:
 
     cache_path = _marketplace_cache_path(alias)
 
-    # Skip fetch if cache is fresh
     meta_file = cache_path / MARKETPLACE_META_FILE
     if meta_file.exists():
         age = time.time() - meta_file.stat().st_mtime
@@ -87,7 +77,6 @@ def _fetch_marketplace(alias: str, url: str) -> tuple[Path, bool, str]:
             return cache_path, True, f"cache fresh ({int(age)}s old)"
 
     tmp_dir = None
-
     try:
         tmp_dir = Path(tempfile.mkdtemp(prefix="aicfg-marketplace-"))
         clone_path = tmp_dir / "repo"
@@ -98,7 +87,6 @@ def _fetch_marketplace(alias: str, url: str) -> tuple[Path, bool, str]:
         shutil.rmtree(clone_path / ".git")
         _write_marketplace_meta(clone_path, alias, url)
 
-        # Atomic swap into cache
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         if cache_path.exists():
             shutil.rmtree(cache_path)
@@ -119,7 +107,6 @@ def marketplace_register(alias: str, url: str) -> dict:
     cache_path = _marketplace_cache_path(alias)
     if cache_path.exists() and _read_marketplace_meta(cache_path):
         raise ValueError(f"Marketplace '{alias}' already registered")
-
     _fetch_marketplace(alias, url)
     return {"alias": alias, "url": url}
 
@@ -129,7 +116,6 @@ def marketplace_remove(alias: str) -> dict:
     cache_path = _marketplace_cache_path(alias)
     if not cache_path.exists() or not _read_marketplace_meta(cache_path):
         raise ValueError(f"Marketplace '{alias}' not found")
-
     shutil.rmtree(cache_path)
     return {"alias": alias, "removed": True}
 
@@ -146,27 +132,13 @@ def parse_skill_md(path: Path) -> tuple[dict, str]:
     text = path.read_text()
     if not text.startswith("---"):
         return {}, text
-
     parts = text.split("---", 2)
     if len(parts) < 3:
         return {}, text
-
     frontmatter = yaml.safe_load(parts[1]) or {}
     body = parts[2].lstrip("\n")
     return frontmatter, body
 
-
-def render_skill_md(frontmatter: dict, body: str) -> str:
-    """Render frontmatter dict and body into a SKILL.md string."""
-    if not frontmatter:
-        return body
-    fm = yaml.dump(
-        frontmatter, default_flow_style=False, sort_keys=False, allow_unicode=True,
-    ).rstrip()
-    return f"---\n{fm}\n---\n\n{body}"
-
-
-# --- Validation ---
 
 def validate_skill_meta(meta: dict) -> list[str]:
     """Validate skill frontmatter. Returns list of errors (empty = valid)."""
@@ -175,33 +147,14 @@ def validate_skill_meta(meta: dict) -> list[str]:
         errors.append("Missing required field: name")
     if not meta.get("description"):
         errors.append("Missing required field: description")
-
-    has_only = "only" in meta
-    has_exclude = "exclude" in meta
-    if has_only and has_exclude:
-        errors.append("Cannot specify both 'only' and 'exclude'")
-
-    if has_only:
-        for p in meta["only"]:
-            if p not in SUPPORTED_PLATFORMS:
-                errors.append(f"Unknown platform in 'only': {p}")
-
-    if has_exclude:
-        for p in meta["exclude"]:
-            if p not in SUPPORTED_PLATFORMS:
-                errors.append(f"Unknown platform in 'exclude': {p}")
-
-    invocation = meta.get("invocation", "both")
-    if invocation not in VALID_INVOCATION_MODES:
-        errors.append(f"Invalid invocation mode: {invocation}. Must be one of: {', '.join(VALID_INVOCATION_MODES)}")
-
     return errors
 
 
 # --- Platform helpers ---
 
 def resolve_effective_targets(meta: dict) -> set[str]:
-    """Determine which platforms a skill targets based on only/exclude."""
+    """Determine which platforms a skill targets.
+    TODO: Move only/exclude to .marketplace files instead of SKILL.md frontmatter."""
     if "only" in meta:
         return set(meta["only"])
     if "exclude" in meta:
@@ -225,25 +178,6 @@ def _get_platform_install_dir(platform: str) -> Path:
     elif platform == "gemini":
         return get_gemini_skills_dir()
     raise ValueError(f"Unknown platform: {platform}")
-
-
-def generate_platform_skill(meta: dict, body: str, target: str) -> str:
-    """Generate a clean, platform-native SKILL.md for a target platform."""
-    cleaned = {k: v for k, v in meta.items() if k not in AICFG_ONLY_FIELDS}
-
-    platform_overrides = meta.get(target, {})
-    if platform_overrides:
-        cleaned.update(platform_overrides)
-
-    invocation = meta.get("invocation", "both")
-    if invocation == "slash-only":
-        if target == "claude":
-            cleaned["disable-model-invocation"] = True
-    elif invocation == "ambient-only":
-        if target == "claude":
-            cleaned["user-invocable"] = False
-
-    return render_skill_md(cleaned, body)
 
 
 def get_installed_status(name: str) -> dict[str, bool]:
@@ -270,7 +204,7 @@ def _scan_skills_dir(skills_dir: Path, source_name: str, max_depth: int = 3) -> 
                 continue
             skill_md = entry / "SKILL.md"
             if skill_md.exists():
-                meta, body = parse_skill_md(skill_md)
+                meta, _ = parse_skill_md(skill_md)
                 errors = validate_skill_meta(meta)
                 if errors:
                     continue
@@ -278,15 +212,12 @@ def _scan_skills_dir(skills_dir: Path, source_name: str, max_depth: int = 3) -> 
                 results.append({
                     "name": name,
                     "description": meta.get("description", ""),
-                    "category": meta.get("category", ""),
-                    "invocation": meta.get("invocation", "both"),
                     "effective_targets": sorted(resolve_effective_targets(meta)),
                     "installed": get_installed_status(name),
                     "source": source_name,
                     "source_path": str(entry),
                 })
             else:
-                # No SKILL.md here — recurse into subdirectory (it's a collection)
                 _scan(entry, depth + 1)
 
     _scan(skills_dir, 0)
@@ -321,7 +252,6 @@ def _discover_installed_skills() -> dict[str, dict[str, bool]]:
 # --- Public API ---
 
 def list_skills(
-    category: Optional[str] = None,
     target: Optional[str] = None,
     installed: Optional[bool] = None,
 ) -> list[dict]:
@@ -329,15 +259,12 @@ def list_skills(
     seen_names = set()
     results = []
 
-    # 1. Skills from registered marketplaces
     for skill in _get_all_marketplace_skills():
         name = skill["name"]
         if name in seen_names:
             continue
         seen_names.add(name)
 
-        if category and skill.get("category") != category:
-            continue
         if target and target not in skill["effective_targets"]:
             continue
         if installed is True and not any(skill["installed"].values()):
@@ -347,26 +274,21 @@ def list_skills(
 
         results.append(skill)
 
-    # 2. Locally installed skills not in any marketplace
     all_installed = _discover_installed_skills()
     for name, status in sorted(all_installed.items()):
         if name in seen_names:
             continue
 
         desc = ""
-        skill_category = ""
         for platform_dir in [get_claude_skills_dir(), get_gemini_skills_dir()]:
             skill_md = platform_dir / name / "SKILL.md"
             if skill_md.exists():
                 meta, _ = parse_skill_md(skill_md)
                 desc = meta.get("description", "")
-                skill_category = meta.get("category", "")
                 break
 
         effective_targets = sorted(SUPPORTED_PLATFORMS)
 
-        if category and skill_category != category:
-            continue
         if target and target not in effective_targets:
             continue
         if installed is True and not any(status.values()):
@@ -377,8 +299,6 @@ def list_skills(
         results.append({
             "name": name,
             "description": desc,
-            "category": skill_category,
-            "invocation": "unknown",
             "effective_targets": effective_targets,
             "installed": status,
             "source": "-",
@@ -397,7 +317,6 @@ def get_skill(name: str) -> Optional[dict]:
             skill["body"] = body
             return skill
 
-    # Fall back to installed copy
     for platform_dir in [get_claude_skills_dir(), get_gemini_skills_dir()]:
         skill_md = platform_dir / name / "SKILL.md"
         if skill_md.exists():
@@ -405,8 +324,6 @@ def get_skill(name: str) -> Optional[dict]:
             return {
                 "name": meta.get("name", name),
                 "description": meta.get("description", ""),
-                "category": meta.get("category", ""),
-                "invocation": meta.get("invocation", "unknown"),
                 "effective_targets": sorted(SUPPORTED_PLATFORMS),
                 "installed": get_installed_status(name),
                 "source": "-",
@@ -441,15 +358,14 @@ def _find_skill_source(name: str) -> tuple[Optional[Path], Optional[str], str]:
 
 
 def install_skill(name: str, target: Optional[str] = None) -> dict:
-    """Install a skill to configured platforms. Returns result dict."""
-    # Parse marketplace/skill-name syntax
+    """Install a skill to configured platforms. Returns result dict.
+    Copies the SKILL.md as-is — no transformation."""
     marketplace_filter = None
     if "/" in name:
         parts = name.split("/", 1)
         marketplace_filter = parts[0]
         name = parts[1]
 
-    # Fetch latest from all marketplaces (or specific one)
     fetch_messages = []
     for mp in _list_registered_marketplaces():
         if marketplace_filter and not mp["alias"].startswith(marketplace_filter):
@@ -460,13 +376,12 @@ def install_skill(name: str, target: Optional[str] = None) -> dict:
         except ValueError as e:
             fetch_messages.append(str(e))
 
-    # Find the skill source
     source_dir, source_alias, source_url = _find_skill_source(name)
     if source_dir is None:
         raise FileNotFoundError(f"Skill not found: {name}")
 
     skill_md = source_dir / "SKILL.md"
-    meta, body = parse_skill_md(skill_md)
+    meta, _ = parse_skill_md(skill_md)
     errors = validate_skill_meta(meta)
     if errors:
         raise ValueError(f"Invalid skill '{name}': {'; '.join(errors)}")
@@ -490,19 +405,17 @@ def install_skill(name: str, target: Optional[str] = None) -> dict:
     for t in sorted(install_targets):
         dest_dir = _get_platform_install_dir(t) / name
         dest_dir.mkdir(parents=True, exist_ok=True)
-        platform_content = generate_platform_skill(meta, body, t)
-        (dest_dir / "SKILL.md").write_text(platform_content)
+        # Copy SKILL.md as-is — standard agentskills.io format, no transformation
+        shutil.copy2(skill_md, dest_dir / "SKILL.md")
         installed.append(str(dest_dir))
 
-    # Determine if we used cache
-    cache_path = _marketplace_cache_path(source_alias) if source_alias else None
-    from_cache = any("cached" in m for m in fetch_messages) if fetch_messages else False
+    from_cache = any("cache" in m for m in fetch_messages) if fetch_messages else False
 
     return {
         "name": name,
         "installed": installed,
         "source": source_alias or "-",
-        "url": f"{source_url}" if source_url else "-",
+        "url": source_url if source_url else "-",
         "from_cache": from_cache,
         "message": "; ".join(fetch_messages) if fetch_messages else None,
     }
@@ -510,7 +423,6 @@ def install_skill(name: str, target: Optional[str] = None) -> dict:
 
 def uninstall_skill(name: str, target: Optional[str] = None) -> list[str]:
     """Uninstall a skill from platforms. Returns list of removed paths."""
-    # Try marketplace source for effective targets
     source_dir, _, _ = _find_skill_source(name)
     if source_dir:
         meta, _ = parse_skill_md(source_dir / "SKILL.md")
@@ -534,14 +446,5 @@ def uninstall_skill(name: str, target: Optional[str] = None) -> list[str]:
         if dest_dir.exists():
             shutil.rmtree(dest_dir)
             removed.append(str(dest_dir))
-
-    # Clean up gemini TOML command if slash-only
-    if source_dir:
-        meta, _ = parse_skill_md(source_dir / "SKILL.md")
-        if meta.get("invocation") == "slash-only" and "gemini" in uninstall_targets:
-            toml_path = get_user_cmds_dir() / f"{name}.toml"
-            if toml_path.exists():
-                toml_path.unlink()
-                removed.append(str(toml_path))
 
     return removed

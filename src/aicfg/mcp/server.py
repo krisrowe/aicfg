@@ -141,17 +141,15 @@ async def check_mcp_server_startup(command: str, args: Optional[list[str]] = Non
 
 @mcp.tool()
 async def list_skills(
-    category: Optional[str] = None,
     target: Optional[str] = None,
 ) -> dict[str, Any]:
     """List available cross-tool skills with optional filtering.
 
     Args:
-        category: Filter by skill category (e.g. 'productivity', 'dev-workflow')
         target: Filter by platform ('claude' or 'gemini')
     """
     try:
-        results = skills_sdk.list_skills(category=category, target=target)
+        results = skills_sdk.list_skills(target=target)
         return {"skills": results}
     except Exception as e:
         logger.error(f"Error listing skills: {e}")
