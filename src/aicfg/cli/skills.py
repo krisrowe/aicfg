@@ -103,17 +103,21 @@ def list_skills(category, target, installed, not_installed, fmt):
     table.add_column("Claude", justify="center", width=6)
     table.add_column("Gemini", justify="center", width=6)
 
-    for source, skills_in_source in grouped.items():
-        label = "[dim](unmanaged)[/dim]" if source == "-" else f"[bold]{source}[/bold]"
-        table.add_row(label, "", "", "", end_section=True)
-        for s in skills_in_source:
+    sources = list(grouped.items())
+    for i, (source, skills_in_source) in enumerate(sources):
+        label = f"[bold]--{source}--[/bold]" if source != "-" else "[bold]--(unmanaged)--[/bold]"
+        table.add_row(label, "[dim]MARKETPLACE[/dim]", "", "")
+        table.add_row("", "", "", "")
+        for j, s in enumerate(skills_in_source):
             claude_status = "[green]✓[/green]" if s["installed"]["claude"] else "[dim]-[/dim]"
             gemini_status = "[green]✓[/green]" if s["installed"]["gemini"] else "[dim]-[/dim]"
             if "claude" not in s["effective_targets"]:
                 claude_status = "[dim]n/a[/dim]"
             if "gemini" not in s["effective_targets"]:
                 gemini_status = "[dim]n/a[/dim]"
-            table.add_row(s["name"], s["description"], claude_status, gemini_status)
+            # Last skill in group gets separator if there's another group after
+            is_last = (j == len(skills_in_source) - 1) and (i < len(sources) - 1)
+            table.add_row(s["name"], s["description"], claude_status, gemini_status, end_section=is_last)
 
     console.print(table)
 
