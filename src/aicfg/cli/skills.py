@@ -105,9 +105,9 @@ def list_skills(category, target, installed, not_installed, fmt):
 
     sources = list(grouped.items())
     for i, (source, skills_in_source) in enumerate(sources):
-        label = f"[bold]--{source}--[/bold]" if source != "-" else "[bold]--(unmanaged)--[/bold]"
-        table.add_row(label, "[dim]MARKETPLACE[/dim]", "", "")
-        table.add_row("", "", "", "")
+        if source != "-":
+            table.add_row(f"[bold]--{source}--[/bold]", "[dim]MARKETPLACE[/dim]", "", "")
+            table.add_row("", "", "", "")
         for j, s in enumerate(skills_in_source):
             claude_status = "[green]✓[/green]" if s["installed"]["claude"] else "[dim]-[/dim]"
             gemini_status = "[green]✓[/green]" if s["installed"]["gemini"] else "[dim]-[/dim]"
