@@ -80,6 +80,24 @@ def get_gemini_skills_dir() -> Path:
         return Path(path_str)
     return Path.home() / ".gemini" / "skills"
 
+def get_ai_common_config_dir() -> Path:
+    """Shared AI config directory (~/.config/ai-common)."""
+    path_str = os.environ.get("AICFG_CONFIG_DIR")
+    if path_str:
+        return Path(path_str)
+    return Path.home() / ".config" / "ai-common"
+
+def get_skills_config_path() -> Path:
+    """Path to skills.json (~/.config/ai-common/skills.json)."""
+    return get_ai_common_config_dir() / "skills.json"
+
+def get_marketplace_cache_dir() -> Path:
+    """Cache directory for marketplace clones (~/.cache/ai-common/skills/marketplaces)."""
+    path_str = os.environ.get("AICFG_MARKETPLACE_CACHE_DIR")
+    if path_str:
+        return Path(path_str)
+    return Path.home() / ".cache" / "ai-common" / "skills" / "marketplaces"
+
 def ensure_dirs():
     """Ensure user command directory exists."""
     get_user_cmds_dir().mkdir(parents=True, exist_ok=True)

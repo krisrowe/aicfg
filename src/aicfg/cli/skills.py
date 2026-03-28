@@ -18,6 +18,48 @@ def skills():
     pass
 
 
+@skills.group()
+def marketplace():
+    """Manage skill marketplaces."""
+    pass
+
+
+@marketplace.command(name="register")
+@click.argument("alias")
+@click.argument("url")
+def marketplace_register(alias, url):
+    """Register a marketplace. ALIAS is like owner/repo, URL is the git URL."""
+    try:
+        result = sdk.marketplace_register(alias, url)
+        console.print(f"  [green]✓[/green] Registered {result['alias']} ({result['url']})")
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+
+@marketplace.command(name="list")
+def marketplace_list():
+    """List registered marketplaces."""
+    results = sdk.marketplace_list()
+    if not results:
+        click.echo("No marketplaces registered.")
+        return
+    for mp in results:
+        console.print(f"  {mp['alias']}  [dim]{mp['url']}[/dim]")
+
+
+@marketplace.command(name="remove")
+@click.argument("alias")
+def marketplace_remove(alias):
+    """Remove a registered marketplace."""
+    try:
+        sdk.marketplace_remove(alias)
+        console.print(f"  [red]✗[/red] Removed {alias}")
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+
 @skills.command(name="list")
 @click.option("--category", "-c", help="Filter by category")
 @click.option("--target", "-t", type=click.Choice(["claude", "gemini"]), help="Filter by platform")
@@ -49,7 +91,7 @@ def list_skills(category, target, installed, not_installed, fmt):
     table = Table(title="Skills", expand=True)
     table.add_column("Name", style="cyan", no_wrap=True, ratio=2)
     table.add_column("Description", no_wrap=True, overflow="ellipsis", ratio=4)
-    table.add_column("Source", style="dim", no_wrap=True)
+    table.add_column("Source", style="dim", no_wrap=True, justify="center")
     table.add_column("Claude", justify="center", width=6)
     table.add_column("Gemini", justify="center", width=6)
 
@@ -61,8 +103,7 @@ def list_skills(category, target, installed, not_installed, fmt):
         if "gemini" not in s["effective_targets"]:
             gemini_status = "[dim]n/a[/dim]"
 
-        source = s.get("source", "(local)")
-        table.add_row(s["name"], s["description"], source, claude_status, gemini_status)
+        table.add_row(s["name"], s["description"], s.get("source", "-"), claude_status, gemini_status)
 
     console.print(table)
 
@@ -76,21 +117,18 @@ def show(name):
         click.echo(f"Skill not found: {name}", err=True)
         sys.exit(1)
 
-    from rich.panel import Panel
-    from rich.text import Text
-
     console.print(f"\n[bold cyan]{skill['name']}[/bold cyan]")
     console.print(f"  [dim]Description:[/dim] {skill['description']}")
     console.print(f"  [dim]Category:[/dim]    {skill['category'] or '(none)'}")
     console.print(f"  [dim]Invocation:[/dim]  {skill['invocation']}")
     console.print(f"  [dim]Targets:[/dim]     {', '.join(skill['effective_targets'])}")
+    console.print(f"  [dim]Source:[/dim]      {skill.get('source', '-')}")
 
     for platform, is_installed in skill["installed"].items():
         if platform in skill["effective_targets"]:
             icon = "[green]✓ installed[/green]" if is_installed else "[dim]not installed[/dim]"
             console.print(f"  [dim]{platform}:[/dim]       {icon}")
 
-    # Show body preview
     body_lines = skill["body"].strip().split("\n")
     preview = "\n".join(body_lines[:20])
     if len(body_lines) > 20:
@@ -104,9 +142,14 @@ def show(name):
 def install(name, target):
     """Install a skill to configured platforms."""
     try:
-        installed = sdk.install_skill(name, target=target)
-        for path in installed:
+        result = sdk.install_skill(name, target=target)
+        for path in result["installed"]:
             console.print(f"  [green]✓[/green] {path}")
+        if result.get("from_cache"):
+            console.print(f"  [yellow]Warning:[/yellow] Installed from cache")
+        if result.get("message"):
+            console.print(f"  [dim]{result['message']}[/dim]")
+        console.print(f"  [dim]Source: {result['source']} ({result['url']})[/dim]")
     except (FileNotFoundError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
