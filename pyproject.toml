@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aicfg"
+version = "0.2.0"
+description = "AI Config Manager — cross-tool skill marketplace and configuration for Claude Code and Gemini CLI"
+requires-python = ">=3.11"
+dependencies = [
+    "click",
+    "toml",
+    "rich",
+    "pyyaml",
+    "mcp",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+aicfg = "aicfg.cli:cli"
+aicfg-mcp = "aicfg.mcp.server:run_server"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+aicfg = ["*.yaml"]

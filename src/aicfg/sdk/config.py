@@ -24,9 +24,9 @@ def get_aicfg_tool_repo_dir() -> Path:
     if path_str:
         return Path(path_str)
     
-    # Discover relative to this file
-    package_dir = Path(__file__).resolve().parent
-    repo_root = package_dir.parent.parent
+    # Discover relative to this file (src/aicfg/sdk/config.py → repo root)
+    this_file = Path(__file__).resolve()
+    repo_root = this_file.parent.parent.parent.parent
     
     # Validation
     if not (repo_root / ".git").exists() and not os.environ.get("AICFG_SKIP_GIT_CHECK_FOR_TESTS"):
@@ -58,6 +58,27 @@ def get_project_cmds_dir() -> Path:
         return Path(root) / ".gemini" / "commands"
     except subprocess.CalledProcessError:
         return Path.cwd() / ".gemini" / "commands"
+
+def get_skill_source_dir() -> Path:
+    """Skills source directory in the aicfg repo (src/aicfg/skills)."""
+    path_str = os.environ.get("AICFG_SKILL_SOURCE_DIR")
+    if path_str:
+        return Path(path_str)
+    return get_aicfg_tool_repo_dir() / "src" / "aicfg" / "skills"
+
+def get_claude_skills_dir() -> Path:
+    """Claude Code user skills directory (~/.claude/skills)."""
+    path_str = os.environ.get("AICFG_CLAUDE_SKILLS_DIR")
+    if path_str:
+        return Path(path_str)
+    return Path.home() / ".claude" / "skills"
+
+def get_gemini_skills_dir() -> Path:
+    """Gemini CLI user skills directory (~/.gemini/skills)."""
+    path_str = os.environ.get("AICFG_GEMINI_SKILLS_DIR")
+    if path_str:
+        return Path(path_str)
+    return Path.home() / ".gemini" / "skills"
 
 def ensure_dirs():
     """Ensure user command directory exists."""

@@ -5,6 +5,7 @@ from mcp.server.fastmcp import FastMCP
 from aicfg.sdk import commands as cmds_sdk
 from aicfg.sdk import settings as settings_sdk
 from aicfg.sdk import mcp_setup as mcp_sdk
+from aicfg.sdk import skills as skills_sdk
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP("aicfg")
@@ -136,6 +137,70 @@ async def check_mcp_server_startup(command: str, args: Optional[list[str]] = Non
         full_cmd = [command] + (args or [])
         return mcp_sdk.check_mcp_startup(full_cmd)
     except Exception as e:
+        return {"error": str(e)}
+
+@mcp.tool()
+async def list_skills(
+    category: Optional[str] = None,
+    target: Optional[str] = None,
+) -> dict[str, Any]:
+    """List available cross-tool skills with optional filtering.
+
+    Args:
+        category: Filter by skill category (e.g. 'productivity', 'dev-workflow')
+        target: Filter by platform ('claude' or 'gemini')
+    """
+    try:
+        results = skills_sdk.list_skills(category=category, target=target)
+        return {"skills": results}
+    except Exception as e:
+        logger.error(f"Error listing skills: {e}")
+        return {"error": str(e)}
+
+@mcp.tool()
+async def get_skill(name: str) -> dict[str, Any]:
+    """Get full details of a skill including metadata and instructions.
+
+    Args:
+        name: The skill name (e.g. 'find-session')
+    """
+    try:
+        result = skills_sdk.get_skill(name)
+        if result:
+            return result
+        return {"error": f"Skill '{name}' not found."}
+    except Exception as e:
+        logger.error(f"Error getting skill: {e}")
+        return {"error": str(e)}
+
+@mcp.tool()
+async def install_skill(name: str, target: Optional[str] = None) -> dict[str, Any]:
+    """Install a skill to configured platforms.
+
+    Args:
+        name: The skill name (e.g. 'find-session')
+        target: Optional platform to install to ('claude' or 'gemini'). Default: all supported.
+    """
+    try:
+        installed = skills_sdk.install_skill(name, target=target)
+        return {"success": True, "installed": installed}
+    except Exception as e:
+        logger.error(f"Error installing skill: {e}")
+        return {"error": str(e)}
+
+@mcp.tool()
+async def uninstall_skill(name: str, target: Optional[str] = None) -> dict[str, Any]:
+    """Uninstall a skill from platforms.
+
+    Args:
+        name: The skill name (e.g. 'find-session')
+        target: Optional platform to uninstall from ('claude' or 'gemini'). Default: all.
+    """
+    try:
+        removed = skills_sdk.uninstall_skill(name, target=target)
+        return {"success": True, "removed": removed}
+    except Exception as e:
+        logger.error(f"Error uninstalling skill: {e}")
         return {"error": str(e)}
 
 @mcp.resource("aicfg://commands")
