@@ -238,6 +238,90 @@ def test_list_skills_source_from_manifest(skills_env):
     assert my_skill["source"] == "mp-a"
 
 
+# --- Skill listing: status ---
+
+def test_list_skills_status_current(skills_env):
+    """Freshly installed skill from marketplace shows 'current'."""
+    _create_marketplace(
+        skills_env["marketplace_cache"], "test/mp", "https://example.com/mp.git", ["my-skill"]
+    )
+    skills.install_skill("my-skill")
+
+    result = skills.list_skills()
+    my_skill = [s for s in result if s["name"] == "my-skill"][0]
+    assert my_skill["status"] == "current"
+
+
+def test_list_skills_status_modified(skills_env):
+    """Locally edited skill shows 'modified'."""
+    _create_marketplace(
+        skills_env["marketplace_cache"], "test/mp", "https://example.com/mp.git", ["my-skill"]
+    )
+    skills.install_skill("my-skill")
+
+    # Edit the installed copy
+    installed_md = skills_env["claude_skills"] / "my-skill" / "SKILL.md"
+    installed_md.write_text(installed_md.read_text() + "\nLocal edit\n")
+
+    result = skills.list_skills()
+    my_skill = [s for s in result if s["name"] == "my-skill"][0]
+    assert my_skill["status"] == "modified"
+
+
+def test_list_skills_status_outdated(skills_env):
+    """Skill with newer marketplace source shows 'outdated'."""
+    _create_marketplace(
+        skills_env["marketplace_cache"], "test/mp", "https://example.com/mp.git", ["my-skill"]
+    )
+    skills.install_skill("my-skill")
+
+    # Update the marketplace source
+    source_md = skills_env["marketplace_cache"] / "test~mp" / "my-skill" / "SKILL.md"
+    source_md.write_text(source_md.read_text() + "\nNew version\n")
+
+    result = skills.list_skills()
+    my_skill = [s for s in result if s["name"] == "my-skill"][0]
+    assert my_skill["status"] == "outdated"
+
+
+def test_list_skills_status_conflict(skills_env):
+    """Both locally modified and marketplace updated shows 'conflict'."""
+    _create_marketplace(
+        skills_env["marketplace_cache"], "test/mp", "https://example.com/mp.git", ["my-skill"]
+    )
+    skills.install_skill("my-skill")
+
+    # Edit both
+    installed_md = skills_env["claude_skills"] / "my-skill" / "SKILL.md"
+    installed_md.write_text(installed_md.read_text() + "\nLocal edit\n")
+    source_md = skills_env["marketplace_cache"] / "test~mp" / "my-skill" / "SKILL.md"
+    source_md.write_text(source_md.read_text() + "\nUpstream change\n")
+
+    result = skills.list_skills()
+    my_skill = [s for s in result if s["name"] == "my-skill"][0]
+    assert my_skill["status"] == "conflict"
+
+
+def test_list_skills_status_untracked(skills_env):
+    """Manually placed skill with no manifest entry shows 'untracked'."""
+    _create_skill(skills_env["claude_skills"], "manual", description="Manually placed")
+
+    result = skills.list_skills()
+    manual = [s for s in result if s["name"] == "manual"][0]
+    assert manual["status"] == "untracked"
+
+
+def test_list_skills_no_status_for_uninstalled(skills_env):
+    """Not-installed skills should not have a status field."""
+    _create_marketplace(
+        skills_env["marketplace_cache"], "test/mp", "https://example.com/mp.git", ["available"]
+    )
+
+    result = skills.list_skills()
+    available = [s for s in result if s["name"] == "available"][0]
+    assert "status" not in available
+
+
 # --- Skill install ---
 
 def test_install_skill_to_both_platforms(skills_env):

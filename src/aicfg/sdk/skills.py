@@ -318,6 +318,55 @@ def _discover_installed_skills() -> dict[str, dict[str, bool]]:
 
 # --- Public API ---
 
+def _check_status(name: str, manifest: dict, marketplace_hash: Optional[str] = None) -> Optional[str]:
+    """Determine the status of an installed skill.
+
+    Compares three hashes: manifest (what was installed), disk (what's on
+    disk now), and optionally marketplace (what's in the source repo cache).
+
+    Returns:
+        'current'   — disk matches manifest, manifest matches marketplace
+        'modified'  — disk differs from manifest (locally edited)
+        'outdated'  — marketplace differs from manifest (newer source available)
+        'conflict'  — both modified locally and outdated vs marketplace
+        'untracked' — installed but no manifest entry
+        None        — not installed
+    """
+    entry = manifest.get(name)
+    if not entry:
+        # Check if installed at all
+        for platform_dir in [get_claude_skills_dir(), get_gemini_skills_dir()]:
+            if (platform_dir / name / "SKILL.md").exists():
+                return "untracked"
+        return None
+
+    manifest_hash = entry.get("document", {}).get("hash")
+    if not manifest_hash:
+        return "untracked"
+
+    # Get disk hash
+    disk_hash = None
+    for platform_dir in [get_claude_skills_dir(), get_gemini_skills_dir()]:
+        disk_md = platform_dir / name / "SKILL.md"
+        if disk_md.exists():
+            disk_hash = _hash_file(disk_md)
+            break
+
+    if disk_hash is None:
+        return None
+
+    disk_modified = disk_hash != manifest_hash
+    source_changed = marketplace_hash is not None and marketplace_hash != manifest_hash
+
+    if disk_modified and source_changed:
+        return "conflict"
+    if disk_modified:
+        return "modified"
+    if source_changed:
+        return "outdated"
+    return "current"
+
+
 def _matches_installed_filter(status: dict[str, bool], installed: Optional[str]) -> bool:
     """Check if a skill's install status matches the filter.
 
@@ -357,6 +406,12 @@ def list_skills(
                      marketplace cache. For installed skills, the path
                      from the install manifest. Use with
                      marketplace_list() url to locate in the source repo.
+      - status (str, present only for installed skills): One of:
+          'current'   — matches manifest and marketplace source.
+          'modified'  — locally edited since install (disk != manifest).
+          'outdated'  — marketplace has newer content (marketplace != manifest).
+          'conflict'  — both modified locally and outdated.
+          'untracked' — installed but no manifest entry.
 
     Args:
         installed: Filter by install status. None shows all skills.
@@ -382,11 +437,20 @@ def list_skills(
 
         # Override source from manifest for installed skills
         is_installed = any(skill["installed"].values())
-        if is_installed and name in manifest:
-            entry = manifest[name]
-            skill["source"] = entry.get("source", skill["source"])
-            if "path" in entry:
-                skill["source_path"] = entry["path"]
+        if is_installed:
+            # Compute marketplace hash before overriding source_path
+            mp_hash = None
+            mp_md = Path(skill["source_path"]) / "SKILL.md"
+            if mp_md.exists():
+                mp_hash = _hash_file(mp_md)
+            if name in manifest:
+                entry = manifest[name]
+                skill["source"] = entry.get("source", skill["source"])
+                if "path" in entry:
+                    skill["source_path"] = entry["path"]
+            status = _check_status(name, manifest, marketplace_hash=mp_hash)
+            if status:
+                skill["status"] = status
 
         results.append(skill)
 
@@ -426,6 +490,9 @@ def list_skills(
         }
         if source_path:
             result["source_path"] = source_path
+        status = _check_status(name, manifest)
+        if status:
+            result["status"] = status
         results.append(result)
 
     return results

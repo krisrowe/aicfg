@@ -186,6 +186,12 @@ async def list_skills(
       - source_path: Path to the skill directory within the marketplace
                      repo. Use with skills_marketplaces_list() url to
                      locate the skill in its source repo for updates.
+      - status (str, installed skills only): One of:
+          'current'   — matches manifest and marketplace source.
+          'modified'  — locally edited since install.
+          'outdated'  — marketplace has newer content.
+          'conflict'  — both modified locally and outdated.
+          'untracked' — installed but no manifest entry.
 
     Args:
         installed: Filter by install status. None (default) shows all.

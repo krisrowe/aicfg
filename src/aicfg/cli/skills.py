@@ -104,17 +104,26 @@ def list_skills(installed, fmt):
             grouped[source] = []
         grouped[source].append(s)
 
+    STATUS_DISPLAY = {
+        "current": "[green]current[/green]",
+        "modified": "[yellow]modified[/yellow]",
+        "outdated": "[yellow]outdated[/yellow]",
+        "conflict": "[red]conflict[/red]",
+        "untracked": "[dim]untracked[/dim]",
+    }
+
     table = Table(title="Skills", expand=True)
     table.add_column("Name", style="cyan", no_wrap=True, ratio=3)
     table.add_column("Description", no_wrap=True, overflow="ellipsis", ratio=4)
     table.add_column("Claude", justify="center", width=6)
     table.add_column("Gemini", justify="center", width=6)
+    table.add_column("Status", justify="center", width=10)
 
     sources = list(grouped.items())
     for i, (source, skills_in_source) in enumerate(sources):
         if source != "-":
-            table.add_row(f"[bold]--{source}--[/bold]", "[dim]MARKETPLACE[/dim]", "", "")
-            table.add_row("", "", "", "")
+            table.add_row(f"[bold]--{source}--[/bold]", "[dim]MARKETPLACE[/dim]", "", "", "")
+            table.add_row("", "", "", "", "")
         for j, s in enumerate(skills_in_source):
             claude_status = "[green]✓[/green]" if s["installed"]["claude"] else "[dim]-[/dim]"
             gemini_status = "[green]✓[/green]" if s["installed"]["gemini"] else "[dim]-[/dim]"
@@ -122,9 +131,10 @@ def list_skills(installed, fmt):
                 claude_status = "[dim]n/a[/dim]"
             if "gemini" not in s["effective_targets"]:
                 gemini_status = "[dim]n/a[/dim]"
+            status = STATUS_DISPLAY.get(s.get("status", ""), "[dim]-[/dim]")
             # Last skill in group gets separator if there's another group after
             is_last = (j == len(skills_in_source) - 1) and (i < len(sources) - 1)
-            table.add_row(s["name"], s["description"], claude_status, gemini_status, end_section=is_last)
+            table.add_row(s["name"], s["description"], claude_status, gemini_status, status, end_section=is_last)
 
     console.print(table)
 
