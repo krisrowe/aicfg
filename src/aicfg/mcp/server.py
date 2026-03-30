@@ -143,17 +143,17 @@ async def check_mcp_server_startup(command: str, args: Optional[list[str]] = Non
 async def skills_marketplaces_list() -> dict[str, Any]:
     """List registered skill marketplaces.
 
-    Marketplaces are git repos containing skill directories (each with a
-    SKILL.md file). Each entry returns an alias and the git URL for the
-    repo.
+    Marketplaces are where published skills live. The install_skill
+    tool can only install skills that have been published to a
+    marketplace. Use the publish_skill tool to push a locally-authored
+    skill to a central (and typically remote) marketplace.
 
-    To discover which skills a marketplace provides, use list_skills() —
-    each skill result includes a ``source`` field (marketplace alias) and
-    ``source_path`` (the skill's directory within the repo).
-
-    To publish a new or updated skill, clone the repo at the returned
-    ``url``, add or update the skill folder at the path shown by
-    ``source_path`` from list_skills()/get_skill(), commit, and push.
+    IMPORTANT: Writing files to a local path or local repo clone will
+    NOT make skills available to the install_skill tool. Marketplaces
+    are typically configured as remote central repositories, and the
+    install_skill tool reads from them accordingly. The publish_skill
+    tool is the only reliable way to get a skill into a marketplace
+    where the install_skill tool will find it.
 
     Returns:
         marketplaces: List of {alias, url} entries.
@@ -172,27 +172,22 @@ async def list_skills(
 ) -> dict[str, Any]:
     """List skills from all registered marketplaces and locally installed.
 
-    For installed skills, the source field comes from the install manifest
-    (where the skill was actually installed from), not from marketplace
-    name matching.
+    Shows both published (available in marketplaces) and installed
+    (copied to platform skill directories) skills.
 
     Each skill result includes:
       - name: Skill name.
-      - description: Short description from SKILL.md frontmatter.
+      - description: From SKILL.md frontmatter.
       - effective_targets: Platforms this skill supports (['claude', 'gemini']).
       - installed: {platform: bool} showing install status per platform.
-      - source: For installed skills, the marketplace alias from the
-                install manifest. For available skills, the marketplace
-                where the skill was found. '-' if unknown.
-      - source_path: Path to the skill directory within the marketplace
-                     repo. Use with skills_marketplaces_list() url to
-                     locate the skill in its source repo for updates.
-      - status (str, installed skills only): One of:
-          'current'   — matches manifest and marketplace source.
-          'modified'  — locally edited since install.
-          'outdated'  — marketplace has newer content.
+      - source: Which marketplace the skill came from. '-' if unknown.
+      - source_path: Where the skill lives within its marketplace.
+      - status (installed skills only): One of:
+          'current'   — installed copy matches the marketplace.
+          'modified'  — edited locally since install.
+          'outdated'  — marketplace has a newer version.
           'conflict'  — both modified locally and outdated.
-          'untracked' — installed but no manifest entry.
+          'untracked' — installed but not from a marketplace.
 
     Args:
         installed: Filter by install status. None (default) shows all.
@@ -214,11 +209,10 @@ async def list_skills(
 async def get_skill(name: str, refresh: bool = False) -> dict[str, Any]:
     """Get full details of a skill including metadata and instructions.
 
-    For installed skills, includes on-disk document info, manifest
-    provenance, and per-marketplace details with status comparison.
-
-    Marketplace data comes from local cache (5-minute TTL). Use
-    refresh=True to force a cache update. Avoid refreshing on every call.
+    Returns installed status, SKILL.md content, and marketplace
+    availability. Use refresh=True to force a cache update if you
+    expect recent changes (5-minute TTL). Avoid refreshing on every
+    call.
 
     Args:
         name: The skill name (e.g. 'find-session')
@@ -235,28 +229,28 @@ async def get_skill(name: str, refresh: bool = False) -> dict[str, Any]:
 
 @mcp.tool()
 async def install_skill(name: str, platform: Optional[str] = None) -> dict[str, Any]:
-    """Install a skill to configured platforms.
+    """Install a skill to local platform directories.
 
-    Copies SKILL.md as-is from the marketplace source and records
-    provenance in the install manifest.
+    Given a skill name, this tool looks for it in a central marketplace
+    (generally non-local). A skill must first be published to a
+    marketplace using the publish_skill tool before this tool can find
+    it. Writing a SKILL.md to a local directory will typically not
+    make it installable.
 
     Result codes:
-      - newly_installed: First install, no prior manifest entry.
-      - content_updated: Source SKILL.md hash differs from manifest hash
-        (hash-based, not version-based).
-      - document_unchanged: Source SKILL.md hash matches manifest hash.
-        Skill directory is still copied to targets regardless.
+      - newly_installed: First install.
+      - content_updated: Marketplace has newer content than what was
+        previously installed.
+      - document_unchanged: Already up to date (still copies to targets).
       - failed: Installation did not succeed.
 
     Response includes:
       - success (bool)
       - result (str): One of the result codes above.
-      - installed (dict): Provenance — ref, source, url, path,
-        document {version, hash, length}.
-      - previous (dict, omitted for newly_installed/failed): Prior
-        provenance — ref, source, url, path, installed_at, dirty (bool),
-        document {version, hash, length}. When dirty is true, document
-        reflects live disk state; provenance fields come from manifest.
+      - installed (dict): Where the skill was installed from — source,
+        url, path, document {version, hash, length}.
+      - previous (dict, omitted for newly_installed/failed): What was
+        installed before this update.
       - targets (list[str]): Platform directories where skill was copied.
       - message (str): Human-readable summary.
 
@@ -291,43 +285,41 @@ async def publish_skill(
     source_path: Optional[str] = None,
     message: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Publish a local skill to a marketplace git repo.
+    """Publish a locally-authored skill to a marketplace.
 
-    Clones the marketplace repo, copies the skill directory in, commits,
-    and pushes. Updates the local install manifest and invalidates the
-    marketplace cache.
+    This is how skills become available to the install_skill tool.
+    Takes a skill from a local source (either an installed platform
+    copy or a directory on disk) and pushes it to the marketplace.
 
-    The ``path`` parameter determines where the skill lands in the repo.
-    This aligns with ``gemini skills install <url> --path <path>`` so
-    the same repo works with both aicfg and native Gemini CLI. Claude
-    Code has no native skill CLI; aicfg copies SKILL.md to
-    ~/.claude/skills/<name>/SKILL.md directly.
+    Two source flows:
+      - Skill already installed to a platform: pass name (and
+        optionally platform to disambiguate).
+      - Skill authored locally but not yet installed: pass name and
+        source_path pointing to the directory containing SKILL.md.
 
     Result codes:
-      - published: Committed and pushed successfully.
-      - no_changes: Skill matches what's already in the repo.
+      - published: Pushed to marketplace successfully.
+      - no_changes: Skill already matches what's in the marketplace.
       - failed: Publish did not succeed.
 
-    The response includes a ``git_ops`` list recording each git command
-    executed in order, with exit codes and combined output. This provides
-    transparency into the publish process. ``git_ops`` is for review and
-    debugging — do not couple application logic to its structure or
-    contents. Use the structured fields (success, result, ref, message)
-    for control flow.
+    The response includes a ``git_ops`` list with each step taken
+    during publish — for review and debugging only.
 
     Args:
         name: Skill name (must exist locally or at source_path).
         platform: Which platform's installed copy to use ('claude' or
                   'gemini'). Auto-detected if omitted. Cannot be used
                   with source_path.
-        marketplace: Target marketplace alias. Defaults to manifest
-                     source. Required for skills with no manifest entry.
-        path: Destination path within the repo (e.g. 'coding/my-skill').
-              Maps to --path arg of 'gemini skills install'. Defaults
-              to manifest path or skill name.
-        source_path: Absolute path to a local skill directory. For skills
-                     not installed to any platform. Cannot be used with
-                     platform.
+        marketplace: Target marketplace alias. Defaults to the
+                     marketplace the skill is already associated with
+                     (via a prior install_skill or publish_skill).
+                     Required for skills not yet associated with any
+                     marketplace.
+        path: Destination path within the marketplace (e.g.
+              'coding/my-skill'). Defaults to prior path or skill name.
+        source_path: Absolute path to a local skill directory containing
+                     SKILL.md. Use this for skills not yet installed to
+                     any platform. Cannot be used with platform.
         message: Git commit message. Default: 'Publish skill: <name>'.
     """
     return skills_sdk.publish_skill(
