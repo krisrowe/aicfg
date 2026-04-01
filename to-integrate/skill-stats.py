@@ -14,6 +14,10 @@ Integration notes:
   - The detection method is platform-specific. Claude Code uses <command-name>
     XML tags injected when a skill fires. Other platforms may use different
     markers. Each platform needs its own parser.
+  - em is moving to a provider model where platform-specific behavior is
+    abstracted behind providers. Session stats collection is a good candidate
+    for a provider method — each provider knows where its platform stores
+    sessions and how to parse skill invocations from them.
   - See echomodel/echomodel#20 for the full design discussion.
 """
 
